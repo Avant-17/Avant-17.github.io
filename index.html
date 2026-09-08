@@ -78,13 +78,12 @@
   <header>
     <h1>📅 日历记账本</h1>
     <div style="display:flex;gap:6px">
-      <button class="icon-btn" onclick="backup()" title="备份">💾</button>
-      <button class="icon-btn" onclick="document.getElementById('importFile').click()" title="恢复">📥</button>
+      <button class="icon-btn" onclick="pickDataFile()" title="选择数据自动保存位置">📁</button>
+      <button class="icon-btn" onclick="backup()" title="导出备份">💾</button>
       <button class="icon-btn" onclick="openSettings()" title="薪资设置">⚙️</button>
+      <button class="icon-btn" id="installBtn" style="display:none" title="安装应用">⬇️</button>
     </div>
   </header>
-  <input type="file" id="importFile" accept=".json" style="display:none" onchange="restore(this)">
-
   <div class="month-nav">
     <button class="nav" onclick="changeMonth(-1)">‹</button>
     <span id="monthLabel"></span>
@@ -168,7 +167,7 @@ let currentDate = null, curType='income', curMode='hours';
 
 const fmt = n => '¥' + (n||0).toFixed(2);
 const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-const save = () => localStorage.setItem(LS_DATA, JSON.stringify(entries));
+const save = () => { localStorage.setItem(LS_DATA, JSON.stringify(entries)); autoSaveFile(); };
 const $ = id => document.getElementById(id);
 const dayDialog=$('dayDialog'), settingsDialog=$('settingsDialog');
 
@@ -285,35 +284,119 @@ function saveSettings(){
   settings.hourly=parseFloat($('setHourly').value)||0;
   settings.daily=parseFloat($('setDaily').value)||0;
   localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
+  autoSaveFile();
   settingsDialog.close(); render();
 }
 
-// 备份 / 恢复
+// ===== 数据文件自动保存（File System Access API，Chrome/Edge）=====
+let dataFileHandle=null, autoSaveTimer=null;
+
+function idb(){ // 用 IndexedDB 记住所选文件，下次打开自动恢复
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open('calFin',1);
+    req.onupgradeneeded=()=>req.result.createObjectStore('kv');
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error);
+  });
+}
+async function idbSet(v){ const db=await idb(); await new Promise((res,rej)=>{ const t=db.transaction('kv','readwrite'); t.objectStore('kv').put(v,'dataFile'); t.oncomplete=res; t.onerror=()=>rej(t.error); }); db.close(); }
+async function idbGet(){ const db=await idb(); const r=await new Promise((res,rej)=>{ const t=db.transaction('kv','readonly'); const q=t.objectStore('kv').get('dataFile'); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); db.close(); return r; }
+
+function allData(){ return {entries,settings,exportedAt:new Date().toISOString()}; }
+
+async function pickDataFile(){
+  if(!window.showSaveFilePicker){ alert('当前浏览器不支持自选保存位置（需要 Chrome/Edge 桌面版，并在 https 或 localhost 下打开）。'); return; }
+  try{
+    const h=await showSaveFilePicker({
+      suggestedName:`记账数据-${ymd(new Date())}.json`,
+      types:[{description:'JSON 数据文件',accept:{'application/json':['.json']}}]
+    });
+    dataFileHandle=h;
+    await idbSet(h);
+    await writeDataFile();
+    alert('已设置自动保存位置：\n'+h.name+'\n\n以后每次记账都会自动写入该文件，打开应用时也会自动读取。');
+  }catch(e){ /* 用户取消 */ }
+}
+
+async function writeDataFile(){
+  if(!dataFileHandle) return;
+  try{
+    const w=await dataFileHandle.createWritable();
+    await w.write(JSON.stringify(allData(),null,2));
+    await w.close();
+  }catch(e){ /* 文件被删除或无权限时静默跳过，localStorage 仍有数据 */ }
+}
+
+function autoSaveFile(){ // 防抖：连续记账只写一次
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer=setTimeout(writeDataFile,500);
+}
+
+async function loadDataFile(){
+  if(!dataFileHandle) return;
+  try{
+    if((await dataFileHandle.queryPermission({mode:'readwrite'}))!=='granted') return; // 需手势授权时不自动弹窗
+    const f=await dataFileHandle.getFile();
+    const d=JSON.parse(await f.text());
+    if(d.entries){
+      // 以文件和本地较新的一方为准（比较最后导出时间不做，直接询问）
+      if(JSON.stringify(d.entries)!==JSON.stringify(entries)){
+        if(confirm('检测到数据文件内容与本机不同，是否用文件内容覆盖本机？\n（“取消”则保留本机数据并把本机数据写回文件）')){
+          entries=d.entries; settings=d.settings||settings;
+          localStorage.setItem(LS_DATA,JSON.stringify(entries));
+          localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
+          render();
+        }
+      }
+    }
+  }catch(e){ /* 文件不存在或格式错误时忽略 */ }
+}
+
+// 启动时恢复文件关联
+(async()=>{
+  try{
+    dataFileHandle=await idbGet();
+    if(dataFileHandle){
+      const p=await dataFileHandle.queryPermission({mode:'readwrite'});
+      if(p==='granted') loadDataFile();
+      else { // 需要用户点一下授权
+        const b=document.createElement('button');
+        b.className='btn'; b.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:99;max-width:616px;margin:0 auto;display:block';
+        b.textContent='📂 重新连接数据文件（'+dataFileHandle.name+'）';
+        b.onclick=async()=>{
+          const p2=await dataFileHandle.requestPermission({mode:'readwrite'});
+          b.remove();
+          if(p2==='granted'){ await loadDataFile(); writeDataFile(); }
+        };
+        document.body.appendChild(b);
+      }
+    }
+  }catch(e){}
+})();
+
+// 手动导出备份
 function backup(){
-  const data=JSON.stringify({entries,settings,exportedAt:new Date().toISOString()},null,2);
+  const data=JSON.stringify(allData(),null,2);
   const blob=new Blob([data],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`记账备份-${ymd(new Date())}.json`;
   a.click(); URL.revokeObjectURL(a.href);
 }
-function restore(input){
-  const f=input.files[0]; if(!f)return;
-  const r=new FileReader();
-  r.onload=()=>{
-    try{
-      const d=JSON.parse(r.result);
-      if(!d.entries) throw 0;
-      if(confirm('恢复备份将覆盖当前所有数据，确定继续？')){
-        entries=d.entries; settings=d.settings||settings;
-        save(); localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
-        render();
-      }
-    }catch(e){ alert('备份文件格式不正确'); }
-    input.value='';
-  };
-  r.readAsText(f);
-}
+
+// ===== Chrome 安装为应用 =====
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault(); deferredPrompt=e;
+  $('installBtn').style.display='';
+});
+$('installBtn').onclick=async()=>{
+  if(!deferredPrompt)return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt=null;
+  $('installBtn').style.display='none';
+};
 
 // 左右滑动切换月份
 let touchX=null;
