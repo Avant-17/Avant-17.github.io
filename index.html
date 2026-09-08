@@ -199,8 +199,8 @@ function render(){
     let html=`<div class="dnum">${d}</div>`;
     let inc=0,exp=0;
     (entries[key]||[]).forEach(e=> e.type==='income'? inc+=entryAmount(e): exp+=entryAmount(e));
-    if(inc) html+=`<div class="tag"><span class="in">+${inc>=10000?(inc/10000).toFixed(1)+'w':inc.toFixed(0)}</span></div>`;
-    if(exp) html+=`<div class="tag"><span class="out">-${exp>=10000?(exp/10000).toFixed(1)+'w':exp.toFixed(0)}</span></div>`;
+    if(inc) html+=`<div class="tag"><span class="in">+${tagNum(inc)}</span></div>`;
+    if(exp) html+=`<div class="tag"><span class="out">-${tagNum(exp)}</span></div>`;
     cell.innerHTML=html;
     cell.onclick=()=>openDay(key);
     cal.appendChild(cell);
@@ -219,6 +219,11 @@ function render(){
 }
 
 function changeMonth(n){ view.setMonth(view.getMonth()+n); render(); }
+
+function tagNum(n){ // 日历格子用：保留小数（最多2位，去掉末尾多余的0），过万缩写
+  if(n>=10000) return +(n/10000).toFixed(2)+'w';
+  return +n.toFixed(2);
+}
 
 function openDay(key){
   currentDate=key;
