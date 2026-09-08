@@ -575,6 +575,16 @@ bindCalc('ehoursInput','ehoursPrev');
 bindCalc('edaysInput','edaysPrev');
 bindCalc('eamountInput','eamountPrev');
 
+// 填充账户下拉选项
+(function(){
+  const sel=$('eaccount');
+  ACCOUNTS.forEach(a=>{
+    const o=document.createElement('option');
+    o.value=a; o.textContent=a;
+    sel.appendChild(o);
+  });
+})();
+
 function saveForm(){
   const date=$('edate').value;
   if(!date){ alert('请选择日期'); return; }
@@ -727,7 +737,7 @@ function drawPie(cv,items){
   ctx.beginPath(); ctx.arc(cx,cy,r*0.55,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
   ctx.fillStyle='#2b3245'; ctx.font='bold 13px sans-serif';
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  const t=total>=10000?(total/10000).toFixed(1)+'w':Math.round(total);
+  const t=total>=10000? +( (total/10000).toFixed(2) )+'w' : +( total.toFixed(2) );
   ctx.fillText('¥'+t,cx,cy);
 }
 
