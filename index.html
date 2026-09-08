@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#4f6ef7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="记账本">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>日历记账本</title>
+<style>
+  :root{
+    --primary:#4f6ef7; --primary-dark:#3b57d6;
+    --income:#1a9e5c; --expense:#e0554d;
+    --bg:#f3f5fa; --card:#fff; --border:#e4e8f0; --text:#2b3245; --muted:#8a92a6;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);
+       padding:12px 12px calc(12px + var(--safe-b));max-width:640px;margin:0 auto;
+       overscroll-behavior-y:contain}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  h1{font-size:19px}
+  .icon-btn{width:38px;height:38px;border:none;border-radius:10px;background:var(--card);
+       border:1px solid var(--border);font-size:17px;cursor:pointer;color:var(--text);flex-shrink:0}
+  .month-nav{display:flex;align-items:center;gap:6px;margin-bottom:12px}
+  .month-nav .nav{flex:1;height:40px;border:1px solid var(--border);background:var(--card);
+       border-radius:10px;font-size:18px;color:var(--text);cursor:pointer}
+  #monthLabel{font-size:17px;font-weight:700;min-width:112px;text-align:center}
+
+  .summary{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px}
+  .card .label{font-size:11px;color:var(--muted)}
+  .card .value{font-size:17px;font-weight:700;margin-top:3px;word-break:break-all}
+  .value.income{color:var(--income)} .value.expense{color:var(--expense)} .value.balance{color:var(--primary)}
+
+  .calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .dow{text-align:center;font-size:12px;color:var(--muted);padding:2px 0}
+  .day{background:var(--card);border:1px solid var(--border);border-radius:9px;aspect-ratio:1/1.08;
+       padding:4px 5px;cursor:pointer;position:relative;overflow:hidden;
+       display:flex;flex-direction:column;transition:.12s}
+  .day:active{background:#eef1fe}
+  .day.empty{background:transparent;border:none;cursor:default}
+  .day.today{border:2px solid var(--primary)}
+  .day .dnum{font-size:12px;font-weight:600;align-self:flex-end}
+  .day .tag{font-size:10px;line-height:1.45;margin-top:1px;font-weight:600}
+  .tag .in{color:var(--income)} .tag .out{color:var(--expense)}
+
+  dialog{border:none;border-radius:16px;padding:18px;width:min(480px,94vw);max-height:86vh;
+       box-shadow:0 10px 40px rgba(0,0,0,.25)}
+  dialog::backdrop{background:rgba(0,0,0,.4)}
+  dialog h3{margin-bottom:12px;font-size:16px}
+  .form-row{margin-bottom:11px}
+  .form-row>label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  .form-row input,.form-row select{width:100%;padding:10px;border:1px solid var(--border);
+       border-radius:10px;font-size:16px;background:#fff;color:var(--text)}
+  .seg{display:flex;background:#eef1f6;border-radius:10px;padding:3px;gap:3px}
+  .seg button{flex:1;border:none;background:transparent;border-radius:8px;padding:8px 0;
+       font-size:14px;color:var(--muted);cursor:pointer}
+  .seg button.on{background:#fff;color:var(--primary);font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .hint{font-size:11px;color:var(--muted);margin-top:5px}
+  .entries{margin-top:10px;max-height:26vh;overflow:auto;-webkit-overflow-scrolling:touch}
+  .entry{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;
+       border:1px solid var(--border);border-radius:10px;margin-bottom:6px;font-size:13px}
+  .entry .del{color:var(--expense);cursor:pointer;border:none;background:none;font-size:13px;padding:6px}
+  .actions{display:flex;gap:8px;margin-top:12px}
+  .btn{flex:1;padding:12px;border:1px solid var(--border);background:#fff;border-radius:12px;
+       font-size:15px;color:var(--text);cursor:pointer}
+  .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600}
+  .btn.primary:active{background:var(--primary-dark)}
+</style>
+</head>
+<body>
+  <header>
+    <h1>📅 日历记账本</h1>
+    <div style="display:flex;gap:6px">
+      <button class="icon-btn" onclick="backup()" title="备份">💾</button>
+      <button class="icon-btn" onclick="document.getElementById('importFile').click()" title="恢复">📥</button>
+      <button class="icon-btn" onclick="openSettings()" title="薪资设置">⚙️</button>
+    </div>
+  </header>
+  <input type="file" id="importFile" accept=".json" style="display:none" onchange="restore(this)">
+
+  <div class="month-nav">
+    <button class="nav" onclick="changeMonth(-1)">‹</button>
+    <span id="monthLabel"></span>
+    <button class="nav" onclick="changeMonth(1)">›</button>
+  </div>
+
+  <div class="summary">
+    <div class="card"><div class="label">当月总收入</div><div class="value income" id="sumIncome">¥0.00</div></div>
+    <div class="card"><div class="label">当月总支出</div><div class="value expense" id="sumExpense">¥0.00</div></div>
+    <div class="card"><div class="label">当月结余</div><div class="value balance" id="sumBalance">¥0.00</div></div>
+    <div class="card"><div class="label">记账天数</div><div class="value" id="sumDays">0 天</div></div>
+  </div>
+
+  <div class="calendar" id="calendar"></div>
+
+  <!-- 记账弹窗 -->
+  <dialog id="dayDialog">
+    <h3 id="dialogTitle"></h3>
+    <div class="form-row">
+      <div class="seg" id="typeSeg">
+        <button type="button" data-v="income" class="on">💰 收入</button>
+        <button type="button" data-v="expense">🛒 支出</button>
+      </div>
+    </div>
+    <div class="form-row" id="incomeModeRow">
+      <div class="seg" id="modeSeg">
+        <button type="button" data-v="hours">按小时</button>
+        <button type="button" data-v="days">按天</button>
+        <button type="button" data-v="fixed">固定金额</button>
+      </div>
+    </div>
+    <div class="form-row" id="hoursRow">
+      <label>工作时长（小时）</label>
+      <input type="number" id="hoursInput" step="0.5" min="0" inputmode="decimal" placeholder="例如 8">
+      <div class="hint">时薪 <span id="hourlyRateHint"></span>，金额 = 时薪 × 小时</div>
+    </div>
+    <div class="form-row" id="daysRow" style="display:none">
+      <label>工作天数（0.5 = 半天）</label>
+      <input type="number" id="daysInput" step="0.5" min="0" value="1" inputmode="decimal">
+      <div class="hint">日薪 <span id="dailyRateHint"></span>，金额 = 日薪 × 天</div>
+    </div>
+    <div class="form-row" id="amountRow" style="display:none">
+      <label>金额（元）</label>
+      <input type="number" id="amountInput" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+    </div>
+    <div class="form-row">
+      <label>备注</label>
+      <input type="text" id="noteInput" placeholder="例如：加班 / 午餐">
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="dayDialog.close()">关闭</button>
+      <button class="btn primary" onclick="saveEntry()">添加记录</button>
+    </div>
+    <div class="entries" id="entriesList"></div>
+  </dialog>
+
+  <!-- 薪资设置弹窗 -->
+  <dialog id="settingsDialog">
+    <h3>⚙️ 薪资设置</h3>
+    <div class="form-row">
+      <label>时薪（元/小时）</label>
+      <input type="number" id="setHourly" step="0.01" min="0" inputmode="decimal" placeholder="例如 50">
+    </div>
+    <div class="form-row">
+      <label>日薪（元/天）</label>
+      <input type="number" id="setDaily" step="0.01" min="0" inputmode="decimal" placeholder="例如 400">
+      <div class="hint">两者可只填其一。修改后已有记录金额不变，新记录按新标准计算。</div>
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="settingsDialog.close()">取消</button>
+      <button class="btn primary" onclick="saveSettings()">保存</button>
+    </div>
+  </dialog>
+
+<script>
+const LS_DATA='calFin.entries', LS_SETTINGS='calFin.settings';
+let entries = JSON.parse(localStorage.getItem(LS_DATA)||'{}');
+let settings = JSON.parse(localStorage.getItem(LS_SETTINGS)||'{"hourly":0,"daily":0}');
+let view = new Date(); view.setDate(1);
+let currentDate = null, curType='income', curMode='hours';
+
+const fmt = n => '¥' + (n||0).toFixed(2);
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const save = () => localStorage.setItem(LS_DATA, JSON.stringify(entries));
+const $ = id => document.getElementById(id);
+const dayDialog=$('dayDialog'), settingsDialog=$('settingsDialog');
+
+function entryAmount(e){
+  if(e.type==='income'){
+    if(e.mode==='hours') return (e.hours||0)*(e.rate||settings.hourly||0);
+    if(e.mode==='days') return (e.days||0)*(e.rate||settings.daily||0);
+    return e.amount||0;
+  }
+  return e.amount||0;
+}
+
+function render(){
+  $('monthLabel').textContent = `${view.getFullYear()}年${view.getMonth()+1}月`;
+  const cal=$('calendar'); cal.innerHTML='';
+  ['日','一','二','三','四','五','六'].forEach(d=>{
+    const el=document.createElement('div'); el.className='dow'; el.textContent=d; cal.appendChild(el);
+  });
+  const first=new Date(view.getFullYear(),view.getMonth(),1);
+  const daysInMonth=new Date(view.getFullYear(),view.getMonth()+1,0).getDate();
+  const todayStr=ymd(new Date());
+  for(let i=0;i<first.getDay();i++) cal.appendChild(Object.assign(document.createElement('div'),{className:'day empty'}));
+  for(let d=1;d<=daysInMonth;d++){
+    const date=new Date(view.getFullYear(),view.getMonth(),d), key=ymd(date);
+    const cell=document.createElement('div'); cell.className='day'+(key===todayStr?' today':'');
+    let html=`<div class="dnum">${d}</div>`;
+    let inc=0,exp=0;
+    (entries[key]||[]).forEach(e=> e.type==='income'? inc+=entryAmount(e): exp+=entryAmount(e));
+    if(inc) html+=`<div class="tag"><span class="in">+${inc>=10000?(inc/10000).toFixed(1)+'w':inc.toFixed(0)}</span></div>`;
+    if(exp) html+=`<div class="tag"><span class="out">-${exp>=10000?(exp/10000).toFixed(1)+'w':exp.toFixed(0)}</span></div>`;
+    cell.innerHTML=html;
+    cell.onclick=()=>openDay(key);
+    cal.appendChild(cell);
+  }
+  let inc=0,exp=0,days=0;
+  const prefix=`${view.getFullYear()}-${String(view.getMonth()+1).padStart(2,'0')}`;
+  Object.keys(entries).forEach(k=>{
+    if(!k.startsWith(prefix)||!entries[k].length)return;
+    days++;
+    entries[k].forEach(e=> e.type==='income'? inc+=entryAmount(e): exp+=entryAmount(e));
+  });
+  $('sumIncome').textContent=fmt(inc);
+  $('sumExpense').textContent=fmt(exp);
+  $('sumBalance').textContent=fmt(inc-exp);
+  $('sumDays').textContent=days+' 天';
+}
+
+function changeMonth(n){ view.setMonth(view.getMonth()+n); render(); }
+
+function openDay(key){
+  currentDate=key;
+  const [y,m,d]=key.split('-');
+  $('dialogTitle').textContent=`${y}年${+m}月${+d}日 记账`;
+  $('hourlyRateHint').textContent=fmt(settings.hourly);
+  $('dailyRateHint').textContent=fmt(settings.daily);
+  resetForm();
+  renderEntries();
+  dayDialog.showModal();
+}
+
+function resetForm(){
+  curType='income'; curMode='hours';
+  $('hoursInput').value=''; $('daysInput').value=1; $('amountInput').value=''; $('noteInput').value='';
+  updateSegs();
+}
+function updateSegs(){
+  $('typeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===curType));
+  $('modeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===curMode));
+  $('incomeModeRow').style.display = curType==='income'?'block':'none';
+  $('hoursRow').style.display = curType==='income'&&curMode==='hours'?'block':'none';
+  $('daysRow').style.display = curType==='income'&&curMode==='days'?'block':'none';
+  $('amountRow').style.display = (curType==='expense'||curMode==='fixed')?'block':'none';
+}
+$('typeSeg').addEventListener('click',e=>{ if(e.target.dataset.v){curType=e.target.dataset.v;updateSegs();} });
+$('modeSeg').addEventListener('click',e=>{ if(e.target.dataset.v){curMode=e.target.dataset.v;updateSegs();} });
+
+function saveEntry(){
+  const e={type:curType,mode:curType==='income'?curMode:'fixed',note:$('noteInput').value.trim()};
+  let amt=0;
+  if(e.type==='income'&&e.mode==='hours'){
+    e.hours=parseFloat($('hoursInput').value)||0;
+    e.rate=settings.hourly||0; amt=e.hours*e.rate;
+  }else if(e.type==='income'&&e.mode==='days'){
+    e.days=parseFloat($('daysInput').value)||0;
+    e.rate=settings.daily||0; amt=e.days*e.rate;
+  }else{
+    amt=parseFloat($('amountInput').value)||0; e.amount=amt;
+  }
+  if(amt<=0){ alert('金额需要大于 0。按小时/按天会根据薪资设置自动计算，请先在右上角 ⚙️ 填写时薪/日薪。'); return; }
+  (entries[currentDate]=entries[currentDate]||[]).push(e);
+  save(); render(); renderEntries();
+  $('hoursInput').value=''; $('daysInput').value=1; $('amountInput').value=''; $('noteInput').value='';
+}
+
+function renderEntries(){
+  const box=$('entriesList'); box.innerHTML='';
+  (entries[currentDate]||[]).forEach((e,i)=>{
+    const div=document.createElement('div'); div.className='entry';
+    let desc = e.type==='income'
+      ? (e.mode==='hours'? `${e.hours}小时 × ${fmt(e.rate)}` : e.mode==='days'? `${e.days}天 × ${fmt(e.rate)}` : '固定金额')
+      : '支出';
+    div.innerHTML=`<span>${e.type==='income'?'💰':'🛒'} ${desc}${e.note? ' · '+e.note:''}<br><b style="color:${e.type==='income'?'var(--income)':'var(--expense)'}">${fmt(entryAmount(e))}</b></span><button class="del">删除</button>`;
+    div.querySelector('.del').onclick=()=>{ entries[currentDate].splice(i,1); if(!entries[currentDate].length) delete entries[currentDate]; save(); render(); renderEntries(); };
+    box.appendChild(div);
+  });
+}
+
+function openSettings(){
+  $('setHourly').value=settings.hourly||'';
+  $('setDaily').value=settings.daily||'';
+  settingsDialog.showModal();
+}
+function saveSettings(){
+  settings.hourly=parseFloat($('setHourly').value)||0;
+  settings.daily=parseFloat($('setDaily').value)||0;
+  localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
+  settingsDialog.close(); render();
+}
+
+// 备份 / 恢复
+function backup(){
+  const data=JSON.stringify({entries,settings,exportedAt:new Date().toISOString()},null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`记账备份-${ymd(new Date())}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function restore(input){
+  const f=input.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      if(!d.entries) throw 0;
+      if(confirm('恢复备份将覆盖当前所有数据，确定继续？')){
+        entries=d.entries; settings=d.settings||settings;
+        save(); localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
+        render();
+      }
+    }catch(e){ alert('备份文件格式不正确'); }
+    input.value='';
+  };
+  r.readAsText(f);
+}
+
+// 左右滑动切换月份
+let touchX=null;
+document.addEventListener('touchstart',e=>touchX=e.touches[0].clientX,{passive:true});
+document.addEventListener('touchend',e=>{
+  if(touchX===null)return;
+  const dx=e.changedTouches[0].clientX-touchX; touchX=null;
+  if(Math.abs(dx)>80 && !dayDialog.open && !settingsDialog.open) changeMonth(dx<0?1:-1);
+},{passive:true});
+
+render();
+// 注册离线缓存（需通过 http/https 访问）
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
