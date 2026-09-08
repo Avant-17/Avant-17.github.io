@@ -117,17 +117,20 @@
     </div>
     <div class="form-row" id="hoursRow">
       <label>工作时长（小时）</label>
-      <input type="number" id="hoursInput" step="0.5" min="0" inputmode="decimal" placeholder="例如 8">
-      <div class="hint">时薪 <span id="hourlyRateHint"></span>，金额 = 时薪 × 小时</div>
+      <input type="text" id="hoursInput" autocomplete="off" placeholder="例如 8 或 2+4.5">
+      <div class="hint">时薪 <span id="hourlyRateHint"></span>，金额 = 时薪 × 小时 · 支持加减乘除算式</div>
+      <div class="hint calcPrev" id="hoursPrev"></div>
     </div>
     <div class="form-row" id="daysRow" style="display:none">
       <label>工作天数（0.5 = 半天）</label>
-      <input type="number" id="daysInput" step="0.5" min="0" value="1" inputmode="decimal">
-      <div class="hint">日薪 <span id="dailyRateHint"></span>，金额 = 日薪 × 天</div>
+      <input type="text" id="daysInput" autocomplete="off" value="1">
+      <div class="hint">日薪 <span id="dailyRateHint"></span>，金额 = 日薪 × 天 · 支持加减乘除算式</div>
+      <div class="hint calcPrev" id="daysPrev"></div>
     </div>
     <div class="form-row" id="amountRow" style="display:none">
       <label>金额（元）</label>
-      <input type="number" id="amountInput" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+      <input type="text" id="amountInput" autocomplete="off" placeholder="例如 25.5 或 12+8*2">
+      <div class="hint calcPrev" id="amountPrev"></div>
     </div>
     <div class="form-row">
       <label>备注</label>
@@ -231,6 +234,7 @@ function openDay(key){
 function resetForm(){
   curType='income'; curMode='hours';
   $('hoursInput').value=''; $('daysInput').value=1; $('amountInput').value=''; $('noteInput').value='';
+  document.querySelectorAll('.calcPrev').forEach(p=>p.textContent='');
   updateSegs();
 }
 function updateSegs(){
@@ -244,22 +248,51 @@ function updateSegs(){
 $('typeSeg').addEventListener('click',e=>{ if(e.target.dataset.v){curType=e.target.dataset.v;updateSegs();} });
 $('modeSeg').addEventListener('click',e=>{ if(e.target.dataset.v){curMode=e.target.dataset.v;updateSegs();} });
 
+// ===== 算式输入：金额/小时/天数支持 + - * / ( ) =====
+function calcExpr(str){
+  const s=String(str==null?'':str).trim();
+  if(!s) return NaN;
+  if(!/^[0-9+\-*/().\s]+$/.test(s)) return NaN;   // 只允许数字和运算符，防注入
+  try{
+    const v=Function('"use strict";return ('+s+')')();
+    return (typeof v==='number'&&isFinite(v))?v:NaN;
+  }catch(e){ return NaN; }
+}
+function numFrom(input){ // 先按算式求值，求不出再按普通数字解析
+  const v=calcExpr(input.value);
+  return isNaN(v)?(parseFloat(input.value)||0):v;
+}
+function bindCalc(inputId, prevId){
+  const inp=$(inputId), prev=$(prevId);
+  inp.addEventListener('input',()=>{
+    const s=inp.value.trim();
+    if(!/[+\-*/()]/.test(s)){ prev.textContent=''; return; }  // 纯数字不用提示
+    const v=calcExpr(s);
+    if(isNaN(v)){ prev.textContent='⚠ 算式无法计算'; prev.style.color='var(--expense)'; }
+    else { prev.textContent='= '+(+v.toFixed(6)); prev.style.color='var(--primary)'; }
+  });
+}
+bindCalc('hoursInput','hoursPrev');
+bindCalc('daysInput','daysPrev');
+bindCalc('amountInput','amountPrev');
+
 function saveEntry(){
   const e={type:curType,mode:curType==='income'?curMode:'fixed',note:$('noteInput').value.trim()};
   let amt=0;
   if(e.type==='income'&&e.mode==='hours'){
-    e.hours=parseFloat($('hoursInput').value)||0;
+    e.hours=numFrom($('hoursInput'));
     e.rate=settings.hourly||0; amt=e.hours*e.rate;
   }else if(e.type==='income'&&e.mode==='days'){
-    e.days=parseFloat($('daysInput').value)||0;
+    e.days=numFrom($('daysInput'));
     e.rate=settings.daily||0; amt=e.days*e.rate;
   }else{
-    amt=parseFloat($('amountInput').value)||0; e.amount=amt;
+    amt=numFrom($('amountInput')); e.amount=amt;
   }
   if(amt<=0){ alert('金额需要大于 0。按小时/按天会根据薪资设置自动计算，请先在右上角 ⚙️ 填写时薪/日薪。'); return; }
   (entries[currentDate]=entries[currentDate]||[]).push(e);
   save(); render(); renderEntries();
   $('hoursInput').value=''; $('daysInput').value=1; $('amountInput').value=''; $('noteInput').value='';
+  document.querySelectorAll('.calcPrev').forEach(p=>p.textContent='');
 }
 
 function renderEntries(){
