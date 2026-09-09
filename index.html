@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#4f6ef7">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -101,7 +101,8 @@
   .rec .ops button{border:none;background:none;font-size:15px;cursor:pointer;padding:4px 6px}
 
   dialog{border:none;border-radius:16px;padding:18px;width:min(520px,94vw);max-height:88vh;
-       box-shadow:0 10px 40px rgba(0,0,0,.25)}
+       box-shadow:0 10px 40px rgba(0,0,0,.25);overflow-y:auto;overscroll-behavior:contain;
+       -webkit-overflow-scrolling:touch}
   dialog::backdrop{background:rgba(0,0,0,.4)}
   dialog h3{margin-bottom:12px;font-size:16px}
   .form-row{margin-bottom:11px}
@@ -130,16 +131,21 @@
   /* 悬浮记账按钮 */
   .fab{position:fixed;right:18px;bottom:calc(18px + var(--safe-b));width:58px;height:58px;
        border-radius:50%;background:var(--primary);color:#fff;font-size:28px;line-height:1;
-       border:none;box-shadow:0 4px 16px rgba(79,110,247,.5);cursor:pointer;z-index:50}
+       border:none;box-shadow:0 4px 16px rgba(79,110,247,.5);cursor:pointer;z-index:50;
+       touch-action:none;user-select:none}
   .fab:active{background:var(--primary-dark)}
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(95px + var(--safe-b));
+       background:rgba(43,50,69,.92);color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;
+       opacity:0;pointer-events:none;transition:.3s;z-index:99;max-width:86vw;text-align:center}
+  #toast.show{opacity:1}
 </style>
 </head>
 <body>
   <header>
     <h1>📅 日历记账本</h1>
     <div style="display:flex;gap:6px">
-      <button class="icon-btn" onclick="pickDataFile()" title="选择数据自动保存位置">📁</button>
-      <button class="icon-btn" onclick="backup()" title="导出备份">💾</button>
+      <button class="icon-btn" id="folderBtn" onclick="pickDataFile()" title="选择数据自动保存位置（仅电脑版 Chrome 支持）">📁</button>
+      <button class="icon-btn" onclick="backup()" title="保存备份：电脑可自选文件夹，手机保存到下载文件夹">💾</button>
       <button class="icon-btn" onclick="openSettings()" title="薪资设置">⚙️</button>
       <button class="icon-btn" id="installBtn" style="display:none" title="安装应用">⬇️</button>
     </div>
@@ -170,8 +176,9 @@
   <div id="calendarArea"></div>
   <div id="dayPanel" style="display:none"></div>
   <div class="cats-card" id="catsCard" style="display:none"></div>
+  <div id="toast"></div>
 
-  <button class="fab" onclick="openForm()">＋</button>
+  <button class="fab" id="fab" type="button" title="记一笔（按住可拖动，长按隐藏）">＋</button>
 
   <!-- 记账弹窗 -->
   <dialog id="entryDialog">
@@ -204,14 +211,20 @@
     <div class="form-row" id="hoursRow" style="display:none">
       <label>工作时长（小时）</label>
       <input type="text" id="ehoursInput" autocomplete="off" placeholder="例如 8 或 2+4.5">
-      <div class="hint">时薪 <span id="hourlyRateHint"></span> · 支持加减乘除算式</div>
+      <div class="hint">当前时薪 <span id="hourlyRateHint"></span> · 支持加减乘除算式</div>
       <div class="hint calcPrev" id="ehoursPrev"></div>
     </div>
     <div class="form-row" id="daysRow" style="display:none">
       <label>工作天数（0.5 = 半天）</label>
       <input type="text" id="edaysInput" autocomplete="off" value="1">
-      <div class="hint">日薪 <span id="dailyRateHint"></span> · 支持加减乘除算式</div>
+      <div class="hint">当前日薪 <span id="dailyRateHint"></span> · 支持加减乘除算式</div>
       <div class="hint calcPrev" id="edaysPrev"></div>
+    </div>
+    <div class="form-row" id="rateRow" style="display:none">
+      <label>执行单价（锁定薪资，留空则用当前设置）</label>
+      <input type="text" id="erateInput" autocomplete="off" inputmode="decimal" placeholder="例如 50">
+      <div class="hint">保存时此单价会写进这条记录；以后改时薪/日薪，本条金额不变</div>
+      <div class="hint calcPrev" id="eratePrev"></div>
     </div>
     <div class="form-row" id="amountRow">
       <label>金额（元）</label>
@@ -258,7 +271,13 @@
     <div class="form-row">
       <label>日薪（元/天）</label>
       <input type="number" id="setDaily" step="0.01" min="0" inputmode="decimal" placeholder="例如 400">
-      <div class="hint">收入选择"按小时/按天"计费时使用；修改后已有记录金额不变，新记录按新标准计算。</div>
+      <div class="hint">收入选择"按小时/按天"时使用。保存这类记录时，会把当时的单价一起锁定写进记录；以后修改这里只影响新记录，历史金额永久冻结。</div>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text)">
+        <input type="checkbox" id="showFabChk" style="width:auto" checked> 显示右下角「＋」记账按钮
+      </label>
+      <div class="hint">「＋」按钮支持按住拖动到任意位置；长按约 1 秒可快速隐藏。</div>
     </div>
     <div class="actions">
       <button class="btn" onclick="settingsDialog.close()">取消</button>
@@ -277,10 +296,10 @@ let statsType='income';                // 图表弹窗当前类型
 
 /* 分类 / 账户 */
 const CATS={
-  expense:['餐饮','交通','购物','住房','娱乐','医疗','教育','人情','洗澡','饮水','日用','其他'],
+  expense:['餐饮','交通','购物','娱乐','医疗','教育','洗澡','饮水','其他'],
   income:['工资','奖金','兼职','投资','其他']
 };
-const ACCOUNTS=['现金','微信','支付宝','易校园','银行卡','其他'];
+const ACCOUNTS=['微信','支付宝','易校园','银行卡','现金','其他'];
 const PALETTE=['#4f6ef7','#1a9e5c','#e0554d','#f5a623','#9b59b6','#16a085','#e67e22','#34495e','#e84393','#00b894','#6c5ce7','#fd79a8'];
 
 const fmt = n => '¥' + (n||0).toFixed(2);
@@ -303,10 +322,20 @@ function tagNum(n){
 }
 function modeDesc(e){
   if(e.type!=='income') return '';
-  if(e.mode==='hours') return `${e.hours}小时×${fmt(e.rate||settings.hourly)}`;
-  if(e.mode==='days') return `${e.days}天×${fmt(e.rate||settings.daily)}`;
+  if(e.mode==='hours') return `${e.hours}小时 × ${fmt(e.rate||0)}/时（单价已锁定）`;
+  if(e.mode==='days') return `${e.days}天 × ${fmt(e.rate||0)}/天（单价已锁定）`;
   return '';
 }
+// 启动时补锁旧记录单价：没有单价的按小时/按天记录，用当前设置冻结，保证历史金额不再变动
+(function lockRates(){
+  let changed=false;
+  Object.values(entries).forEach(list=>list.forEach(e=>{
+    if(e.type!=='income') return;
+    if(e.mode==='hours'&&!e.rate&&settings.hourly>0){ e.rate=settings.hourly; changed=true; }
+    if(e.mode==='days'&&!e.rate&&settings.daily>0){ e.rate=settings.daily; changed=true; }
+  }));
+  if(changed){ localStorage.setItem(LS_DATA,JSON.stringify(entries)); autoSaveFile(); }
+})();
 
 /* ===== 周期与汇总 ===== */
 function periodPrefix(){
@@ -494,11 +523,12 @@ function openForm(date,edit){
   $('entryTitle').textContent=editing?'✏️ 编辑记录':'✏️ 记一笔';
   $('entrySaveBtn').textContent=editing?'保存修改':'保存';
   $('edate').value=e? edit.date : (date||ymd(new Date()));
-  $('eaccount').value=e? (e.account||'其他') : '现金';
+  $('eaccount').value=e? (e.account||'其他') : '微信';
   $('enote').value=e? (e.note||'') : '';
   $('ehoursInput').value=e&&e.mode==='hours'? e.hours : '';
   $('edaysInput').value=e&&e.mode==='days'? e.days : 1;
   $('eamountInput').value=e&&(e.mode==='fixed'||e.type==='expense')? e.amount : '';
+  $('erateInput').value=e&&e.rate? e.rate : '';
   document.querySelectorAll('.calcPrev').forEach(p=>p.textContent='');
   formCat=e? (e.cat||CATS[formType][0]) : CATS[formType][0];
   $('hourlyRateHint').textContent=fmt(settings.hourly);
@@ -514,6 +544,7 @@ function updateFormUI(){
   $('hoursRow').style.display=isInc&&formMode==='hours'?'block':'none';
   $('daysRow').style.display=isInc&&formMode==='days'?'block':'none';
   $('amountRow').style.display=(isInc&&formMode==='fixed')||!isInc?'block':'none';
+  $('rateRow').style.display=isInc&&(formMode==='hours'||formMode==='days')?'block':'none';
   $('amtResultRow').style.display=isInc&&(formMode==='hours'||formMode==='days')?'block':'none';
   // 分类 chips
   const box=$('ecatChips'); box.innerHTML='';
@@ -526,14 +557,20 @@ function updateFormUI(){
   });
   updateAmtResult();
 }
+function curRate(){ // 执行单价：优先用表单里填写的锁定单价，否则用当前设置
+  if(formType!=='income') return 0;
+  const r=numFrom($('erateInput'));
+  if(r>0) return r;
+  return formMode==='hours'?(settings.hourly||0):(settings.daily||0);
+}
 function updateAmtResult(){
   const el=$('amtResult');
   if(formType==='income'&&formMode==='hours'){
-    const h=numFrom($('ehoursInput'));
-    el.textContent=`本条金额 = ${fmt(h*(settings.hourly||0))}（${h}小时 × 时薪${fmt(settings.hourly)}）`;
+    const h=numFrom($('ehoursInput')), r=curRate();
+    el.textContent=`本条金额 = ${fmt(h*r)}（${h}小时 × ${fmt(r)}/时，保存时锁定单价）`;
   }else if(formType==='income'&&formMode==='days'){
-    const d=numFrom($('edaysInput'));
-    el.textContent=`本条金额 = ${fmt(d*(settings.daily||0))}（${d}天 × 日薪${fmt(settings.daily)}）`;
+    const d=numFrom($('edaysInput')), r=curRate();
+    el.textContent=`本条金额 = ${fmt(d*r)}（${d}天 × ${fmt(r)}/天，保存时锁定单价）`;
   }
 }
 $('etypeSeg').addEventListener('click',e=>{
@@ -574,6 +611,8 @@ function bindCalc(inputId, prevId){
 bindCalc('ehoursInput','ehoursPrev');
 bindCalc('edaysInput','edaysPrev');
 bindCalc('eamountInput','eamountPrev');
+bindCalc('erateInput','eratePrev');
+$('erateInput').addEventListener('input',updateAmtResult);
 
 // 填充账户下拉选项
 (function(){
@@ -596,10 +635,10 @@ function saveForm(){
   let amt=0;
   if(e.type==='income'&&e.mode==='hours'){
     e.hours=numFrom($('ehoursInput'));
-    e.rate=settings.hourly||0; amt=e.hours*e.rate;
+    e.rate=curRate(); amt=e.hours*e.rate;
   }else if(e.type==='income'&&e.mode==='days'){
     e.days=numFrom($('edaysInput'));
-    e.rate=settings.daily||0; amt=e.days*e.rate;
+    e.rate=curRate(); amt=e.days*e.rate;
   }else{
     amt=numFrom($('eamountInput')); e.amount=amt;
   }
@@ -745,12 +784,14 @@ function drawPie(cv,items){
 function openSettings(){
   $('setHourly').value=settings.hourly||'';
   $('setDaily').value=settings.daily||'';
+  $('showFabChk').checked=!localStorage.getItem(FAB_HIDE_KEY);
   settingsDialog.showModal();
 }
 function saveSettings(){
   settings.hourly=parseFloat($('setHourly').value)||0;
   settings.daily=parseFloat($('setDaily').value)||0;
   localStorage.setItem(LS_SETTINGS,JSON.stringify(settings));
+  if($('showFabChk').checked) showFab(); else hideFab(true);
   autoSaveFile();
   settingsDialog.close(); render();
 }
@@ -830,13 +871,26 @@ async function loadDataFile(){
   }catch(e){}
 })();
 
-function backup(){
+async function backup(){ // 电脑版 Chrome 可自选文件夹保存；其他环境（含手机）保存到下载文件夹
   const data=JSON.stringify(allData(),null,2);
+  if(window.showSaveFilePicker){
+    try{
+      const h=await showSaveFilePicker({
+        suggestedName:`记账备份-${ymd(new Date())}.json`,
+        types:[{description:'JSON 数据文件',accept:{'application/json':['.json']}}]
+      });
+      const w=await h.createWritable();
+      await w.write(data); await w.close();
+      toast('已保存到：'+h.name);
+      return;
+    }catch(e){ if(e&&e.name==='AbortError') return; }
+  }
   const blob=new Blob([data],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`记账备份-${ymd(new Date())}.json`;
   a.click(); URL.revokeObjectURL(a.href);
+  toast('备份已保存到下载文件夹');
 }
 
 // ===== Chrome 安装为应用 =====
@@ -861,6 +915,91 @@ document.addEventListener('touchend',e=>{
   const dx=e.changedTouches[0].clientX-touchX; touchX=null;
   if(Math.abs(dx)>80 && !entryDialog.open && !settingsDialog.open && !statsDialog.open) changePeriod(dx<0?1:-1);
 },{passive:true});
+
+// ===== 悬浮「＋」按钮：拖动 / 长按隐藏 =====
+const fab=$('fab');
+const FAB_POS_KEY='calFin.fabPos', FAB_HIDE_KEY='calFin.fabHidden';
+if(!window.showSaveFilePicker) $('folderBtn').style.display='none'; // 手机上隐藏自选位置按钮
+let toastTimer=null;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2400);
+}
+function hideFab(quiet){ fab.style.display='none'; localStorage.setItem(FAB_HIDE_KEY,'1'); if(!quiet) toast('「＋」已隐藏，可在 ⚙️ 设置里恢复'); }
+function showFab(){ fab.style.display=''; localStorage.removeItem(FAB_HIDE_KEY); }
+function applyFabPos(){ // 恢复上次拖动的位置，并限制在屏幕内
+  const raw=localStorage.getItem(FAB_POS_KEY); if(!raw) return;
+  try{
+    const p=JSON.parse(raw), w=fab.offsetWidth||58, h=fab.offsetHeight||58;
+    const x=Math.min(Math.max(p.x,8), innerWidth-w-8);
+    const y=Math.min(Math.max(p.y,8), innerHeight-h-8);
+    fab.style.left=x+'px'; fab.style.top=y+'px'; fab.style.right='auto'; fab.style.bottom='auto';
+  }catch(e){}
+}
+applyFabPos();
+addEventListener('resize',applyFabPos);
+if(localStorage.getItem(FAB_HIDE_KEY)) fab.style.display='none';
+
+let fabDrag=null, fabMoved=false, fabPress=null;
+fab.addEventListener('pointerdown',e=>{
+  fab.setPointerCapture(e.pointerId);
+  const rect=fab.getBoundingClientRect();
+  fabDrag={dx:e.clientX-rect.left, dy:e.clientY-rect.top, x0:e.clientX, y0:e.clientY};
+  fabMoved=false;
+  fabPress=setTimeout(()=>{ if(!fabMoved){ hideFab(); fabDrag=null; } },800); // 长按隐藏
+});
+fab.addEventListener('pointermove',e=>{
+  if(!fabDrag) return;
+  if(!fabMoved && Math.hypot(e.clientX-fabDrag.x0,e.clientY-fabDrag.y0)>10){ fabMoved=true; clearTimeout(fabPress); }
+  if(fabMoved){
+    const w=fab.offsetWidth, h=fab.offsetHeight;
+    const x=Math.min(Math.max(e.clientX-fabDrag.dx,8), innerWidth-w-8);
+    const y=Math.min(Math.max(e.clientY-fabDrag.dy,8), innerHeight-h-8);
+    fab.style.left=x+'px'; fab.style.top=y+'px'; fab.style.right='auto'; fab.style.bottom='auto';
+  }
+});
+fab.addEventListener('pointerup',()=>{
+  clearTimeout(fabPress);
+  if(fabDrag&&fabMoved){
+    localStorage.setItem(FAB_POS_KEY,JSON.stringify({x:parseFloat(fab.style.left),y:parseFloat(fab.style.top)}));
+  }else if(fabDrag&&!fabMoved){
+    openForm(); // 未移动视为点击
+  }
+  fabDrag=null;
+});
+fab.addEventListener('pointercancel',()=>{ clearTimeout(fabPress); fabDrag=null; });
+
+// ===== 软键盘遮挡修复：焦点滚动 + VisualViewport 动态调整 =====
+document.addEventListener('focusin',e=>{
+  if(!e.target.matches||!e.target.matches('input,select,textarea')) return;
+  setTimeout(()=>{ try{ e.target.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){}} ,300);
+});
+(function(){
+  const vv=window.visualViewport; if(!vv) return;
+  function kbOverlap(){ // 键盘遮住底部区域的高度（iOS 上布局视口不变、可视视口缩短）
+    return Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  }
+  function adjust(){
+    const ae=document.activeElement;
+    const focused=ae&&ae.matches&&ae.matches('input,select,textarea');
+    const overlap=kbOverlap();
+    document.querySelectorAll('dialog[open]').forEach(d=>{
+      if(focused&&overlap>40){
+        const r=d.getBoundingClientRect();
+        // 上移弹窗：最多移到顶边距 4px 处
+        const shift=Math.min(overlap, Math.max(0, r.top-4));
+        d.style.transform='translateY(-'+shift+'px)';
+      }else{
+        d.style.transform='';
+      }
+    });
+    if(focused){
+      setTimeout(()=>{ try{ ae.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(_){}} ,60);
+    }
+  }
+  vv.addEventListener('resize',adjust);
+  vv.addEventListener('scroll',adjust);
+})();
 
 render();
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
